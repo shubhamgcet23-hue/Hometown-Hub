@@ -1,0 +1,480 @@
+// Hometown Hub - Prisma schema
+// Normalized PostgreSQL schema covering users, communities, feed, events,
+// notifications, reports, moderation, Pandit onboarding, and audit logs.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------------
+
+enum PlatformRole {
+  USER
+  PLATFORM_ADMIN
+}
+
+enum CommunityRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+enum CommunityPrivacy {
+  PUBLIC
+  PRIVATE
+}
+
+enum CommunityStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PostType {
+  GENERAL
+  ANNOUNCEMENT
+  DISCUSSION
+  EVENT
+  POLL
+}
+
+enum PostStatus {
+  PUBLISHED
+  REMOVED
+}
+
+enum EventStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  MEMBERSHIP_APPROVED
+  MEMBERSHIP_REJECTED
+  NEW_POST
+  NEW_COMMENT
+  NEW_LIKE
+  EVENT_REMINDER
+  EVENT_REGISTRATION
+  ANNOUNCEMENT
+  MODERATOR_ACTION
+  REPORT_RESOLUTION
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+  COMMUNITY
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  HATE_SPEECH
+  INAPPROPRIATE_CONTENT
+  FAKE_INFORMATION
+  FRAUD_SCAM
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// ---------------------------------------------------------------------------
+// USER & AUTH
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String       @id @default(uuid())
+  fullName      String
+  username      String       @unique
+  email         String       @unique
+  passwordHash  String
+  bio           String?
+  profileImage  String?
+  hometown      String?
+  city          String?
+  state         String?
+  country       String?
+  platformRole  PlatformRole @default(USER)
+  status        UserStatus   @default(ACTIVE)
+
+  resetToken       String?
+  resetTokenExpiry DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  communities        CommunityMember[]
+  joinRequests       CommunityJoinRequest[]
+  createdCommunities Community[]             @relation("CommunityCreator")
+  posts              Post[]
+  comments           Comment[]
+  likes              Like[]
+  shares             Share[]
+  createdEvents      Event[]                 @relation("EventOrganizer")
+  eventAttendance    EventAttendee[]
+  notifications      Notification[]
+  reportsFiled       Report[]                @relation("ReportsFiled")
+  reportsResolved    Report[]                @relation("ReportsResolved")
+  auditLogs          AuditLog[]
+  panditProfile      PanditProfile?
+
+  @@index([email])
+  @@index([username])
+}
+
+// ---------------------------------------------------------------------------
+// COMMUNITY
+// ---------------------------------------------------------------------------
+
+model Community {
+  id          String            @id @default(uuid())
+  name        String
+  slug        String            @unique
+  city        String
+  state       String
+  country     String
+  description String
+  coverImage  String?
+  logoImage   String?
+  rules       String?
+  category    String?
+  privacy     CommunityPrivacy  @default(PUBLIC)
+  status      CommunityStatus   @default(PENDING)
+
+  createdById String
+  createdBy   User   @relation("CommunityCreator", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       CommunityMember[]
+  joinRequests  CommunityJoinRequest[]
+  posts         Post[]
+  events        Event[]
+  announcements Announcement[]
+  reports       Report[]
+  tags          Tag[]
+  panditProfiles PanditProfile[]
+
+  @@index([city, state, country])
+  @@index([status])
+}
+
+model CommunityMember {
+  id          String        @id @default(uuid())
+  communityId String
+  userId      String
+  role        CommunityRole @default(MEMBER)
+  joinedAt    DateTime      @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId, role])
+}
+
+model CommunityJoinRequest {
+  id          String             @id @default(uuid())
+  communityId String
+  userId      String
+  status      JoinRequestStatus  @default(PENDING)
+  message     String?
+  createdAt   DateTime           @default(now())
+  resolvedAt  DateTime?
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// FEED: POSTS, IMAGES, COMMENTS, LIKES, SHARES, TAGS
+// ---------------------------------------------------------------------------
+
+model Post {
+  id          String     @id @default(uuid())
+  authorId    String
+  communityId String
+  content     String
+  type        PostType   @default(GENERAL)
+  status      PostStatus @default(PUBLISHED)
+  isPinned    Boolean    @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  community Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  images    PostImage[]
+  comments  Comment[]
+  likes     Like[]
+  shares    Share[]
+  reports   Report[]
+  tags      PostTag[]
+
+  @@index([communityId, isPinned, createdAt])
+  @@index([authorId])
+}
+
+model PostImage {
+  id     String @id @default(uuid())
+  postId String
+  url    String
+  order  Int    @default(0)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author  User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@index([postId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model Share {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id   String @id @default(uuid())
+  name String @unique
+  tags Tag[]
+}
+
+model Tag {
+  id          String    @id @default(uuid())
+  name        String
+  categoryId  String?
+  communityId String?
+
+  category  Category?  @relation(fields: [categoryId], references: [id])
+  community Community? @relation(fields: [communityId], references: [id])
+  posts     PostTag[]
+
+  @@unique([name, communityId])
+}
+
+model PostTag {
+  postId String
+  tagId  String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+model Announcement {
+  id          String    @id @default(uuid())
+  communityId String
+  authorId    String
+  title       String
+  description String
+  image       String?
+  priority    Int       @default(0)
+  isPinned    Boolean   @default(false)
+  expiryDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, isPinned])
+}
+
+// ---------------------------------------------------------------------------
+// EVENTS
+// ---------------------------------------------------------------------------
+
+model Event {
+  id              String      @id @default(uuid())
+  communityId     String
+  organizerId     String
+  title           String
+  description     String
+  coverImage      String?
+  location        String
+  startAt         DateTime
+  endAt           DateTime
+  maxAttendees    Int?
+  status          EventStatus @default(UPCOMING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  community Community       @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  organizer User            @relation("EventOrganizer", fields: [organizerId], references: [id])
+  attendees EventAttendee[]
+
+  @@index([communityId, startAt])
+}
+
+model EventAttendee {
+  id        String   @id @default(uuid())
+  eventId   String
+  userId    String
+  joinedAt  DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id              String           @id @default(uuid())
+  userId          String
+  type            NotificationType
+  title           String
+  message         String
+  relatedEntity   String?
+  isRead          Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+// ---------------------------------------------------------------------------
+// REPORTS / MODERATION
+// ---------------------------------------------------------------------------
+
+model Report {
+  id             String           @id @default(uuid())
+  reporterId     String
+  targetType     ReportTargetType
+  reason         ReportReason
+  description    String?
+  status         ReportStatus     @default(PENDING)
+
+  postId      String?
+  commentId   String?
+  communityId String?
+
+  resolvedById   String?
+  resolutionNote String?
+  createdAt      DateTime @default(now())
+  resolvedAt     DateTime?
+
+  reporter    User       @relation("ReportsFiled", fields: [reporterId], references: [id])
+  resolvedBy  User?      @relation("ReportsResolved", fields: [resolvedById], references: [id])
+  post        Post?      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment     Comment?   @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  community   Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// PANDIT ONBOARDING (extensible local-services directory module)
+// ---------------------------------------------------------------------------
+
+model PanditProfile {
+  id                 String              @id @default(uuid())
+  userId             String              @unique
+  communityId        String?
+  name               String
+  profileImage       String?
+  location           String
+  description        String?
+  experienceYears    Int?
+  servicesOffered    String[]
+  contactPhone       String?
+  contactEmail       String?
+  availability       String?
+  verificationStatus VerificationStatus  @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community? @relation(fields: [communityId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT LOG
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
