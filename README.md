@@ -4,6 +4,19 @@ A hyperlocal community platform where people from the same city or village can
 reconnect, share updates, discuss local topics, organise events, and preserve
 local culture — a focused alternative to scattered WhatsApp groups.
 
+
+## Live Deployment
+
+- **Live site:** https://hometown-hub-ten.vercel.app
+- **API health check:** https://hometown-hub-digital-community-platform.onrender.com/api/health
+- **Project report:** _add your shared report link here_
+- **Demo/feedback video:** _add your shared video link here_
+
+Note: the backend runs on Render's free tier, which sleeps after ~15 minutes
+of inactivity — the first request after a period of idle time can take
+30–60 seconds to respond while it wakes up. This is expected free-tier
+behaviour, not a bug.
+
 This repository contains a **functional MVP core** built to the full product
 spec's data model and architecture: real authentication, RBAC, a working
 REST API backed by PostgreSQL/Prisma, and a Next.js frontend wired to it end
@@ -125,6 +138,39 @@ For production image uploads, replace the local-disk `multer` storage engine
 in `backend/src/middleware/upload.middleware.ts` with a Cloudinary or S3
 multer storage adapter — the rest of the app only consumes the resulting
 `url`, so no other code changes are required.
+
+
+### Known deployment gotchas
+
+These are real issues hit while deploying this project to Render + Vercel —
+documented here so they don't need to be re-diagnosed if you (or anyone else)
+redeploy from this repo:
+
+- **TypeScript version drift.** `typescript` is pinned to an exact version
+  (`5.5.4`, no `^`) in both `package.json` files. A newer TypeScript release
+  removes the classic `moduleResolution: "node"` option outright (error
+  `TS5108`), which breaks the build on a fresh `npm install` even though it
+  works locally with an older cached version. `backend/tsconfig.json` uses
+  the modern, version-stable `"module": "node16"` / `"moduleResolution":
+  "node16"` pairing instead of relying on a version-dependent default.
+- **`devDependencies` getting skipped on Render.** Render (and most CI/CD
+  hosts) applies `NODE_ENV=production` during the build step too, and `npm
+  install` skips `devDependencies` whenever that's set — which silently
+  drops `typescript`, `@types/*`, and other build-time-only tools the build
+  actually needs. Render's **Build Command** must force them in:
+  - **`dist/` output nesting.** `backend/tsconfig.json`'s `rootDir` must be
+  `"src"` (not `"."`), and `"include"` must only cover `src/**/*.ts` —
+  otherwise compiled output nests as `dist/src/index.js` instead of
+  `dist/index.js`, breaking the `npm start` script (`node dist/index.js`).
+  `prisma/seed.ts` doesn't need to go through this build at all; it already
+  runs independently via `ts-node` (see the `seed` npm script).
+- **CORS requires an exact origin match.** The backend's `FRONTEND_URL` env
+  var must exactly match the deployed frontend's origin (no trailing
+  slash) for the CORS middleware to allow requests from it.
+- **Start command typo risk.** Render's start command should be
+  `npx prisma migrate deploy && npm start` — a one-character typo (`px`
+  instead of `npx`) fails with `command not found` and is easy to miss when
+  copy-pasting.
 
 ## 7. API documentation
 
