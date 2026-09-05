@@ -9,8 +9,6 @@ local culture — a focused alternative to scattered WhatsApp groups.
 
 - **Live site:** https://hometown-hub-ten.vercel.app
 - **API health check:** https://hometown-hub-digital-community-platform.onrender.com/api/health
-- **Project report:** _add your shared report link here_
-- **Demo/feedback video:** _add your shared video link here_
 
 Note: the backend runs on Render's free tier, which sleeps after ~15 minutes
 of inactivity — the first request after a period of idle time can take
